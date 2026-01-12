@@ -12,17 +12,20 @@ namespace NyxCEngine
 {
   internal class Program
   {
+    internal static class EnvironmentVariableKeys
+    { 
+      internal const string NyxDbConnection = "NYX_DB_CONNECTION";
+      internal const string PostizApiKey = "POSTIZ_API_KEY";
+      internal const string PostizBasePublicV1 = "POSTIZ_BASE_PUBLIC_V1";
+      internal const string ElevenLabsKey = "ELEVENLABS_KEY";
+    }
+
     private static string[] RequiredEnvVariables = new string[]
       {
-        // Database
-        "NYX_DB_CONNECTION",
-
-        // Postiz
-        "POSTIZ_API_KEY",
-        "POSTIZ_BASE_PUBLIC_V1",
-
-        // ElevenLabs (used by video pipeline)
-        "ELEVENLABS_KEY"
+        EnvironmentVariableKeys.NyxDbConnection,
+        EnvironmentVariableKeys.PostizApiKey,
+        EnvironmentVariableKeys.PostizBasePublicV1,
+        EnvironmentVariableKeys.ElevenLabsKey
       };
 
     internal static string ElevenLabsClientName = "ElevenLabsClient";
@@ -37,8 +40,8 @@ namespace NyxCEngine
       // 100% env-based config (no appsettings.json required)
       // Example:
       // NYX_DB_CONNECTION=Server=localhost;Database=NyxDatabase;User Id=NyxUser;Password=...;Encrypt=True;TrustServerCertificate=True;
-      var cs = Environment.GetEnvironmentVariable("NYX_DB_CONNECTION")
-               ?? builder.Configuration["NYX_DB_CONNECTION"]
+      var cs = Environment.GetEnvironmentVariable(EnvironmentVariableKeys.NyxDbConnection)
+               ?? builder.Configuration[EnvironmentVariableKeys.NyxDbConnection]
                ?? "";
 
       VerifyRequiredEnvVars(RequiredEnvVariables);
@@ -46,7 +49,7 @@ namespace NyxCEngine
       builder.Services.AddDbContextFactory<NyxDbContext>(opt =>
       {
         if (string.IsNullOrWhiteSpace(cs))
-          throw new InvalidOperationException("NYX_DB_CONNECTION env var is required.");
+          throw new InvalidOperationException($"{EnvironmentVariableKeys.NyxDbConnection} env var is required.");
 
         opt.UseSqlServer(cs, sql =>
         {
@@ -58,18 +61,18 @@ namespace NyxCEngine
       builder.Services.AddHttpClient(PostizClientName, (sp, client) =>
       {
         // Load from env
-        var baseUrl = Environment.GetEnvironmentVariable("POSTIZ_BASE_PUBLIC_V1") ?? "";
+        var baseUrl = Environment.GetEnvironmentVariable(EnvironmentVariableKeys.PostizBasePublicV1) ?? "";
         if (string.IsNullOrWhiteSpace(baseUrl))
-          throw new InvalidOperationException("POSTIZ_BASE_PUBLIC_V1 env var is required.");
+          throw new InvalidOperationException($"{EnvironmentVariableKeys.PostizBasePublicV1} env var is required.");
 
         client.BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/");
         client.Timeout = TimeSpan.FromMinutes(10); // uploads can be big
         client.DefaultRequestHeaders.Accept.ParseAdd("application/json");
 
         // API key header (Postiz expects Authorization: <key>)
-        var apiKey = Environment.GetEnvironmentVariable("POSTIZ_API_KEY") ?? "";
+        var apiKey = Environment.GetEnvironmentVariable(EnvironmentVariableKeys.PostizApiKey) ?? "";
         if (string.IsNullOrWhiteSpace(apiKey))
-          throw new InvalidOperationException("POSTIZ_API_KEY env var is required.");
+          throw new InvalidOperationException($"{EnvironmentVariableKeys.PostizApiKey} env var is required.");
 
         client.DefaultRequestHeaders.Remove("Authorization");
         client.DefaultRequestHeaders.Add("Authorization", apiKey);
