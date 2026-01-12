@@ -13,5 +13,6 @@
     internal const string PremadeRoot = "NYX_PREMADE_ROOT";
     internal const string PremadeThumbFontPath = "NYX_PREMADE_THUMB_FONT";
     internal const string BackgroundVideoEndBuffer = "NYX_BG_VIDEO_END_BUFFER_SECONDS";
+    internal const string BackgroundsRoot = "NYX_BACKGROUNDS_ROOT";
   }
 }

@@ -15,7 +15,7 @@ namespace NyxCEngine.Services
     private readonly IServiceProvider _sp;
     private readonly ILogger<GeneratedRenderWorker> _log;
 
-    // 1s lead-in (audio starts at 1s) AND tail hold (video runs 1s longer) via Render() duration extension.
+    // Lead-in + tail hold
     private const double LeadInSeconds = 1.0;
 
     public GeneratedRenderWorker(IServiceProvider sp, ILogger<GeneratedRenderWorker> log)
@@ -47,10 +47,6 @@ namespace NyxCEngine.Services
       var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<NyxDbContext>>();
       await using var db = await dbFactory.CreateDbContextAsync(ct);
 
-      // "Ready to render" rule:
-      // - Generated
-      // - Has WAV + timestamps
-      // - Not rendered yet (BackgroundFilePath == null is our render-complete marker)
       var asset = await db.VideoAssets
         .OrderBy(x => x.CreatedAtUtc)
         .FirstOrDefaultAsync(x =>
@@ -71,19 +67,20 @@ namespace NyxCEngine.Services
         return;
       }
 
-      // For now, we treat Mp4Path as the background source input until you formalize background selection.
-      var backgroundPath = asset.Mp4Path;
+      // Decide background:
+      // - If Mp4Path points to an existing file, treat it as an explicit background override.
+      // - Otherwise pick one from the backgrounds pool and set Mp4Path to it (so we can see what was chosen).
+      var backgroundPath = await ResolveBackgroundPathAsync(asset, ct);
       if (string.IsNullOrWhiteSpace(backgroundPath) || !File.Exists(backgroundPath))
       {
         _log.LogError(
-          "Render failed: background video missing for VideoAssetId={Id}. Mp4Path={Mp4Path}",
-          asset.Id, asset.Mp4Path);
+          "Render failed: no background available for VideoAssetId={Id}. CustomerId={CustomerId}. Mp4Path={Mp4Path}",
+          asset.Id, asset.CustomerId, asset.Mp4Path);
         return;
       }
 
       var timestampsJson = await File.ReadAllTextAsync(asset.TimestampsPath!, ct);
 
-      // Parse alignment -> words -> one-word chunks (same behavior as Python prototype)
       var style = new AssCaptionRenderer.CaptionStyle();
       var words = AssCaptionRenderer.ParseWordsFromTimestampsJson(timestampsJson);
       if (words.Count == 0)
@@ -92,22 +89,18 @@ namespace NyxCEngine.Services
         return;
       }
 
-      // Shift captions forward by the lead-in so they match delayed audio.
+      // Shift captions forward to match delayed audio
       var chunks = AssCaptionRenderer.ChunkOneWord(words, style, LeadInSeconds);
 
-      // Write ASS file next to the script (or next to WAV if script is null) for easy debugging
       var baseDir = Path.GetDirectoryName(asset.ScriptFilePath ?? asset.WavPath!)!;
       var assPath = Path.Combine(baseDir, $"captions_{asset.Id:000000}.ass");
       var ass = AssCaptionRenderer.GenerateAss(chunks, style);
       await File.WriteAllTextAsync(assPath, ass, ct);
 
-      // Duration from WAV (ffprobe)
       var audioDuration = AssCaptionRenderer.ProbeDurationSeconds(asset.WavPath!);
-
-      // Background duration (ffprobe)
       var bgDuration = AssCaptionRenderer.ProbeDurationSeconds(backgroundPath);
 
-      // End buffer seconds (Python default is 10)
+      // End buffer seconds (Python default 10)
       var endBufferEnv = Environment.GetEnvironmentVariable(EnvironmentVariableKeys.BackgroundVideoEndBuffer);
       var endBufferSeconds = 10.0;
       if (!string.IsNullOrWhiteSpace(endBufferEnv) &&
@@ -117,9 +110,6 @@ namespace NyxCEngine.Services
         endBufferSeconds = parsedBuf;
       }
 
-      // Background offset + looping logic:
-      // - If explicit offset exists in DB, respect it (unless unsafe).
-      // - Else random offset if possible; else loop.
       double startTime;
       bool needsLoop;
 
@@ -127,12 +117,11 @@ namespace NyxCEngine.Services
       {
         startTime = explicitOffset;
 
-        // Safety validation: bg must cover start + (audio + lead-in) + endBuffer
         var required = (audioDuration + LeadInSeconds) + endBufferSeconds;
         if (bgDuration <= startTime + required)
         {
           _log.LogWarning(
-            "Background too short for explicit offset. VideoAssetId={Id}. bg={Bg:0.00}s start={Start:0.00}s required={Req:0.00}s (audio+lead+buffer). Falling back to looping from 0.",
+            "Background too short for explicit offset. VideoAssetId={Id}. bg={Bg:0.00}s start={Start:0.00}s required={Req:0.00}s. Falling back to looping from 0.",
             asset.Id, bgDuration, startTime, required);
 
           startTime = 0.0;
@@ -145,7 +134,6 @@ namespace NyxCEngine.Services
       }
       else
       {
-        // Need room for (audio + lead-in) plus end buffer.
         var maxStart = bgDuration - ((audioDuration + LeadInSeconds) + endBufferSeconds);
 
         if (maxStart > 0)
@@ -160,16 +148,12 @@ namespace NyxCEngine.Services
         }
       }
 
-      // Output rendered MP4 path
       var outputPath = Path.Combine(baseDir, $"rendered_{asset.Id:000000}.mp4");
 
       _log.LogInformation(
-        "Rendering VideoAssetId={Id} bgDur={BgDur:0.00}s start={Start:0.00}s loop={Loop} audioDur={Audio:0.00}s leadIn={Lead:0.00}s endBuffer={Buf:0.00}s -> {Out}",
-        asset.Id, bgDuration, startTime, needsLoop, audioDuration, LeadInSeconds, endBufferSeconds, outputPath);
+        "Rendering VideoAssetId={Id} bg={Bg} bgDur={BgDur:0.00}s start={Start:0.00}s loop={Loop} audioDur={Audio:0.00}s leadIn={Lead:0.00}s endBuffer={Buf:0.00}s -> {Out}",
+        asset.Id, backgroundPath, bgDuration, startTime, needsLoop, audioDuration, LeadInSeconds, endBufferSeconds, outputPath);
 
-      // Render final mp4 (Render() will:
-      // - delay audio by LeadInSeconds (adelay)
-      // - extend total duration by LeadInSeconds (tail hold)
       AssCaptionRenderer.Render(
         backgroundPath: backgroundPath,
         audioWavPath: asset.WavPath!,
@@ -181,7 +165,6 @@ namespace NyxCEngine.Services
         audioDelaySeconds: LeadInSeconds
       );
 
-      // Update DB: lock in background + offset used + end buffer, and point Mp4Path to rendered output
       asset.BackgroundFilePath = backgroundPath;
       asset.BackgroundStartOffsetSeconds = startTime;
       asset.EndBufferSecondsUsed = endBufferSeconds;
@@ -190,6 +173,65 @@ namespace NyxCEngine.Services
       await db.SaveChangesAsync(ct);
 
       _log.LogInformation("Rendered VideoAssetId={Id} complete. Mp4Path now {Mp4Path}", asset.Id, asset.Mp4Path);
+    }
+
+    private async Task<string?> ResolveBackgroundPathAsync(VideoAsset asset, CancellationToken ct)
+    {
+      // If Mp4Path already exists on disk, treat it as an explicit override.
+      if (!string.IsNullOrWhiteSpace(asset.Mp4Path) && File.Exists(asset.Mp4Path))
+      {
+        return asset.Mp4Path;
+      }
+
+      var root = (Environment.GetEnvironmentVariable(EnvironmentVariableKeys.BackgroundsRoot) ?? "").Trim();
+      if (string.IsNullOrWhiteSpace(root))
+      {
+        _log.LogError("Missing env var: {Key}. Cannot pick backgrounds automatically.", EnvironmentVariableKeys.BackgroundsRoot);
+        return null;
+      }
+
+      var customerDir = Path.Combine(root, asset.CustomerId);
+      var defaultDir = Path.Combine(root, "default");
+
+      var candidates = new List<string>();
+
+      if (Directory.Exists(customerDir))
+        candidates.AddRange(Directory.EnumerateFiles(customerDir, "*.mp4", SearchOption.TopDirectoryOnly));
+
+      if (candidates.Count == 0 && Directory.Exists(defaultDir))
+        candidates.AddRange(Directory.EnumerateFiles(defaultDir, "*.mp4", SearchOption.TopDirectoryOnly));
+
+      if (candidates.Count == 0)
+      {
+        _log.LogError(
+          "No background MP4s found. Looked in: {CustomerDir} then {DefaultDir}",
+          customerDir, defaultDir);
+        return null;
+      }
+
+      // Random selection
+      var chosen = candidates[Random.Shared.Next(0, candidates.Count)];
+
+      _log.LogInformation(
+        "Selected background for VideoAssetId={Id}: {Chosen} (candidates={Count}, customerDir={CustomerDir})",
+        asset.Id, chosen, candidates.Count, customerDir);
+
+      // Persist choice into Mp4Path so you can see exactly what was used even before render completes.
+      // This also makes the run deterministic if it crashes mid-render and restarts.
+      asset.Mp4Path = chosen;
+
+      // Save immediately so if we crash mid render, we don't keep picking different backgrounds.
+      // (No transaction needed; render completion is still controlled by BackgroundFilePath null/not-null.)
+      using var scope = _sp.CreateScope();
+      var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<NyxDbContext>>();
+      await using var db = await dbFactory.CreateDbContextAsync(ct);
+
+      // Attach minimal update
+      db.Attach(asset);
+      db.Entry(asset).Property(x => x.Mp4Path).IsModified = true;
+      await db.SaveChangesAsync(ct);
+
+      return chosen;
     }
   }
 }
