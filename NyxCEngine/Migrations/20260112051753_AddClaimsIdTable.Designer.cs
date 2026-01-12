@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NyxCEngine.Database;
 
@@ -11,9 +12,11 @@ using NyxCEngine.Database;
 namespace NyxCEngine.Migrations
 {
     [DbContext(typeof(NyxDbContext))]
-    partial class NyxDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260112051753_AddClaimsIdTable")]
+    partial class AddClaimsIdTable
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

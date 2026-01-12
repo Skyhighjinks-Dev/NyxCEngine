@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NyxCEngine.Database;
 
@@ -11,9 +12,11 @@ using NyxCEngine.Database;
 namespace NyxCEngine.Migrations
 {
     [DbContext(typeof(NyxDbContext))]
-    partial class NyxDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260112041308_AddPremadeVideoSeriesAndVideoAssetSeriesFields")]
+    partial class AddPremadeVideoSeriesAndVideoAssetSeriesFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -55,14 +58,6 @@ namespace NyxCEngine.Migrations
                         .HasDatabaseName("idx_bg_customer");
 
                     b.ToTable("background_media", "dbo");
-                });
-
-            modelBuilder.Entity("NyxCEngine.Database.Tables.ClaimedId", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.ToTable("claimed_id", "dbo");
                 });
 
             modelBuilder.Entity("NyxCEngine.Database.Tables.Customer", b =>
@@ -453,10 +448,6 @@ namespace NyxCEngine.Migrations
                     b.Property<string>("TargetIntegrationId")
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("ThumbnailPath")
-                        .HasMaxLength(2048)
-                        .HasColumnType("nvarchar(2048)");
 
                     b.Property<string>("TimestampsPath")
                         .HasMaxLength(2048)

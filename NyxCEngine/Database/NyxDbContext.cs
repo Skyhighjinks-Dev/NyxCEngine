@@ -16,6 +16,8 @@ namespace NyxCEngine.Database
     public DbSet<ScheduledPost> ScheduledPosts { get; set; } = null!;
     public DbSet<ScriptItem> ScriptItems { get; set; } = null!;
     public DbSet<VideoAsset> VideoAssets { get; set; } = null!;
+    public DbSet<PremadeVideoSeries> PremadeVideoSeries { get; set; } = null!;
+    public DbSet<ClaimedId> ClaimedIds => null!;
 
     public NyxDbContext(DbContextOptions<NyxDbContext> options) : base(options)
     {

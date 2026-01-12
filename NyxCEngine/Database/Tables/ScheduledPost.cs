@@ -1,8 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace NyxCEngine.Database.Tables
 {
@@ -73,7 +70,6 @@ namespace NyxCEngine.Database.Tables
        .WithMany(a => a.ScheduledPosts)
        .HasForeignKey(p => p.AssetId)
        .OnDelete(DeleteBehavior.SetNull);
-
     }
   }
 }

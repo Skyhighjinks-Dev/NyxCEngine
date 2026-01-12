@@ -5,6 +5,12 @@ namespace NyxCEngine.Database.Tables
 {
   public class VideoAsset
   {
+    public enum VideoAssetSourceType
+    {
+      Generated = 0,
+      PremadeSegment = 1
+    }
+
     public int Id { get; set; }
 
     public string CustomerId { get; set; } = null!;
@@ -23,9 +29,17 @@ namespace NyxCEngine.Database.Tables
     public double? EndBufferSecondsUsed { get; set; }
 
     public string Mp4Path { get; set; } = null!;
-    public DateTime CreatedAtUtc { get; set; }
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 
     public ICollection<ScheduledPost> ScheduledPosts { get; set; } = new List<ScheduledPost>();
+
+    public Guid? SeriesId { get; set; }
+    public int? SeriesIndex { get; set; }
+    public int? SeriesCount { get; set; }
+    public string? TargetIntegrationId { get; set; }
+
+    public VideoAssetSourceType SourceType { get; set; } // enum
+    public string? ThumbnailPath { get; set; }
   }
 
   public sealed class VideoAssetConfig : IEntityTypeConfiguration<VideoAsset>
@@ -50,10 +64,31 @@ namespace NyxCEngine.Database.Tables
 
       b.Property(x => x.CreatedAtUtc).HasColumnType("datetime2").IsRequired();
 
+      b.Property(x => x.SeriesId)
+        .HasColumnType("uniqueidentifier"); 
+
+      b.Property(x => x.SeriesIndex);
+      b.Property(x => x.SeriesCount);
+
+      b.Property(x => x.TargetIntegrationId)
+        .HasMaxLength(128);
+
+      b.Property(x => x.SourceType)
+        .IsRequired()
+        .HasConversion<int>();
+
+      b.Property(x => x.ThumbnailPath).HasMaxLength(2048);
+
       b.HasOne(v => v.Customer)
        .WithMany(c => c.Assets)
        .HasForeignKey(v => v.CustomerId)
        .OnDelete(DeleteBehavior.Restrict);
+
+      b.HasIndex(x => new { x.SeriesId, x.SeriesIndex });
+
+      b.HasIndex(x => new { x.CustomerId, x.SourceType });
+
+      b.HasIndex(x => x.TargetIntegrationId);
     }
   }
 }

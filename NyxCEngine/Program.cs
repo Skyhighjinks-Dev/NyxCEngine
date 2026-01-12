@@ -7,25 +7,19 @@ using NyxCEngine.APIs.ElevenLabs;
 using NyxCEngine.APIs.Postiz;
 using NyxCEngine.Database;
 using NyxCEngine.Services;
+using NyxCEngine.Util;
 
 namespace NyxCEngine
 {
   internal class Program
   {
-    internal static class EnvironmentVariableKeys
-    { 
-      internal const string NyxDbConnection = "NYX_DB_CONNECTION";
-      internal const string PostizApiKey = "POSTIZ_API_KEY";
-      internal const string PostizBasePublicV1 = "POSTIZ_BASE_PUBLIC_V1";
-      internal const string ElevenLabsKey = "ELEVENLABS_KEY";
-    }
-
     private static string[] RequiredEnvVariables = new string[]
       {
         EnvironmentVariableKeys.NyxDbConnection,
         EnvironmentVariableKeys.PostizApiKey,
         EnvironmentVariableKeys.PostizBasePublicV1,
-        EnvironmentVariableKeys.ElevenLabsKey
+        EnvironmentVariableKeys.ElevenLabsKey,
+        EnvironmentVariableKeys.ElevenLabsVoiceId
       };
 
     internal static string ElevenLabsClientName = "ElevenLabsClient";
@@ -37,14 +31,11 @@ namespace NyxCEngine
       HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
       builder.Configuration.AddEnvironmentVariables();
 
-      // 100% env-based config (no appsettings.json required)
-      // Example:
-      // NYX_DB_CONNECTION=Server=localhost;Database=NyxDatabase;User Id=NyxUser;Password=...;Encrypt=True;TrustServerCertificate=True;
       var cs = Environment.GetEnvironmentVariable(EnvironmentVariableKeys.NyxDbConnection)
                ?? builder.Configuration[EnvironmentVariableKeys.NyxDbConnection]
                ?? "";
 
-      VerifyRequiredEnvVars(RequiredEnvVariables);
+      VerifyRequiredEnvVars(builder.Configuration, RequiredEnvVariables);
 
       builder.Services.AddDbContextFactory<NyxDbContext>(opt =>
       {
@@ -57,7 +48,25 @@ namespace NyxCEngine
         });
       });
 
-      builder.Services.AddHttpClient(ElevenLabsClientName);
+      builder.Services.AddHttpClient(ElevenLabsClientName, (sp, client) =>
+      {
+        client.BaseAddress = new Uri("https://api.elevenlabs.io/");
+        client.Timeout = TimeSpan.FromMinutes(2);
+
+        // Auth
+        var apiKey = builder.Configuration[EnvironmentVariableKeys.ElevenLabsKey] ?? "";
+        if (string.IsNullOrWhiteSpace(apiKey))
+          throw new InvalidOperationException($"{EnvironmentVariableKeys.ElevenLabsKey} env var is required.");
+
+        client.DefaultRequestHeaders.Remove("xi-api-key");
+        client.DefaultRequestHeaders.Add("xi-api-key", apiKey);
+
+        // Accept anything (audio bytes)
+        client.DefaultRequestHeaders.Accept.Clear();
+        client.DefaultRequestHeaders.Accept.ParseAdd("*/*");
+      });
+
+
       builder.Services.AddHttpClient(PostizClientName, (sp, client) =>
       {
         // Load from env
@@ -66,11 +75,11 @@ namespace NyxCEngine
           throw new InvalidOperationException($"{EnvironmentVariableKeys.PostizBasePublicV1} env var is required.");
 
         client.BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/");
-        client.Timeout = TimeSpan.FromMinutes(10); // uploads can be big
+        client.Timeout = TimeSpan.FromMinutes(10); // uploads can be big as working with viedos
         client.DefaultRequestHeaders.Accept.ParseAdd("application/json");
 
         // API key header (Postiz expects Authorization: <key>)
-        var apiKey = Environment.GetEnvironmentVariable(EnvironmentVariableKeys.PostizApiKey) ?? "";
+        var apiKey = builder.Configuration[EnvironmentVariableKeys.PostizApiKey] ?? "";
         if (string.IsNullOrWhiteSpace(apiKey))
           throw new InvalidOperationException($"{EnvironmentVariableKeys.PostizApiKey} env var is required.");
 
@@ -87,6 +96,21 @@ namespace NyxCEngine
       // Should start these background services automatically
       builder.Services.AddHostedService<VideoPipelineWorker>();
       builder.Services.AddHostedService<VideoReconcilerWorker>();
+      builder.Services.AddHostedService<GeneratedAudioWorker>();
+      builder.Services.AddHostedService<GeneratedRenderWorker>();
+
+      string? premadeRoot = builder.Configuration[EnvironmentVariableKeys.PremadeRoot];
+      if (!string.IsNullOrEmpty(premadeRoot))
+      {
+        if (!Directory.Exists(premadeRoot))
+          Directory.CreateDirectory(premadeRoot);
+
+        builder.Services.AddHostedService<PremadeSplitterWorker>();
+        Console.WriteLine($"PremadeSplitterWorker enabled. Root: {premadeRoot}");
+      }
+      else
+        // Log that no path has been provided
+        Console.WriteLine($"No {EnvironmentVariableKeys.PremadeRoot} provided; PremadeSplitterWorker will not start.");
 
       var app = builder.Build();
       await ApplyMigrationsWithRetryAsync(app.Services);
@@ -94,9 +118,9 @@ namespace NyxCEngine
     }
 
 
-    static void VerifyRequiredEnvVars(params string[] keys)
+    static void VerifyRequiredEnvVars(ConfigurationManager manager, params string[] keys)
     {
-      var missing = keys.Where(k => string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(k))).ToList();
+      var missing = keys.Where(k => string.IsNullOrWhiteSpace(manager[k])).ToList();
       if (missing.Count > 0)
         throw new InvalidOperationException("Missing required env vars: " + string.Join(", ", missing));
     }

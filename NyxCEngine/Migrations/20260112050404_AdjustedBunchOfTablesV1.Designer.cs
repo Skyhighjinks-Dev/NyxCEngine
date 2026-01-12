@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NyxCEngine.Database;
 
@@ -11,9 +12,11 @@ using NyxCEngine.Database;
 namespace NyxCEngine.Migrations
 {
     [DbContext(typeof(NyxDbContext))]
-    partial class NyxDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260112050404_AdjustedBunchOfTablesV1")]
+    partial class AdjustedBunchOfTablesV1
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -55,14 +58,6 @@ namespace NyxCEngine.Migrations
                         .HasDatabaseName("idx_bg_customer");
 
                     b.ToTable("background_media", "dbo");
-                });
-
-            modelBuilder.Entity("NyxCEngine.Database.Tables.ClaimedId", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.ToTable("claimed_id", "dbo");
                 });
 
             modelBuilder.Entity("NyxCEngine.Database.Tables.Customer", b =>

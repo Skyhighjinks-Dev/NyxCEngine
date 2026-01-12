@@ -65,9 +65,10 @@ namespace NyxCEngine.APIs.Postiz
 
       using var form = new MultipartFormDataContent();
       var fileContent = new StreamContent(fs);
-      fileContent.Headers.ContentType = new MediaTypeHeaderValue("video/mp4");
 
-      // Name must be "file"
+      var contentType = GuessContentType(filePath);
+      fileContent.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+
       form.Add(fileContent, "file", Path.GetFileName(filePath));
 
       using var req = new HttpRequestMessage(HttpMethod.Post, "upload")
@@ -105,7 +106,7 @@ namespace NyxCEngine.APIs.Postiz
         NullValueHandling = NullValueHandling.Ignore
       });
 
-      _logger.Log(LogLevel.Information, jsonReq);
+      _logger.LogInformation("Schedule payload: {Json}", jsonReq);
 
       using var res = await _httpClient.SendAsync(req, ct);
       await EnsureSuccessOrThrow(res);
@@ -126,6 +127,20 @@ namespace NyxCEngine.APIs.Postiz
         (int)res.StatusCode,
         $"Postiz request failed: {(int)res.StatusCode} {res.ReasonPhrase}",
         body);
+    }
+
+    private static string GuessContentType(string filePath)
+    {
+      var ext = Path.GetExtension(filePath).ToLowerInvariant();
+      return ext switch
+      {
+        ".mp4" => "video/mp4",
+        ".mov" => "video/quicktime",
+        ".webm" => "video/webm",
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".png" => "image/png",
+        _ => "application/octet-stream"
+      };
     }
   }
 }
