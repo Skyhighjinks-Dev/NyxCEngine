@@ -98,6 +98,8 @@ namespace NyxCEngine
       builder.Services.AddHostedService<VideoReconcilerWorker>();
       builder.Services.AddHostedService<GeneratedAudioWorker>();
       builder.Services.AddHostedService<GeneratedRenderWorker>();
+      //builder.Services.AddHostedService<GeneratedThumbnailWorker>(); -- Cant get it to work
+      builder.Services.AddHostedService<PremadeThumbnailWorker>();
 
       string? premadeRoot = builder.Configuration[EnvironmentVariableKeys.PremadeRoot];
       if (!string.IsNullOrEmpty(premadeRoot))

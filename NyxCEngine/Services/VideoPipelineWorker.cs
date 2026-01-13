@@ -76,13 +76,9 @@ namespace NyxCEngine.Services
 
       // 2) Pick integration: forced by TargetIntegrationId if set; else pick first YouTube integration
       var integrations = await _postizEngine.ListIntegrationsAsync(ct);
+      integrations = (ListIntegrationsResponse)integrations.Where(x => !x.Disabled && x.Customer.Id == next.CustomerId).ToList();
 
-      IntegrationDto? integration =
-        !string.IsNullOrWhiteSpace(next.TargetIntegrationId)
-          ? integrations.FirstOrDefault(i => i.Id == next.TargetIntegrationId)
-          : integrations.FirstOrDefault(i => string.Equals(i.Identifier, "youtube", StringComparison.OrdinalIgnoreCase));
-
-      if (integration is null)
+      if (integrations == null || integrations.Count == 0)
         throw new InvalidOperationException("No suitable integration found for scheduling.");
 
       // 3) Decide schedule time.
@@ -135,6 +131,53 @@ namespace NyxCEngine.Services
         selfDeclaredMadeForKids = "no",
         thumbnail = thumbUpload is null ? null : new { id = thumbUpload.Id, path = thumbUpload.Path }
       };
+
+      List<PostItemDto> postDtos = new();
+      foreach(var i in integrations)
+      {
+        object? _settings = null;
+
+        switch (i.Identifier)
+        {
+          case "youtube":
+            settings = new YouTubeSettings()
+            {
+              Title = next.Title!
+              //Tags = 
+            };
+            break;
+
+          case "instagram":
+            settings = new InstagramSettings();
+            break;
+
+          case "tiktok":
+            settings = new TikTokSettings()
+            { 
+              Title = next.Title!
+            };
+            break;
+        }
+
+
+        postDtos.Add(new PostItemDto
+        {
+          Integration = new IntegrationRefWithIdentifier { Id = i.Id },
+          Value = new()
+          { 
+            new PostValueDto
+            { 
+              Content = $"PART {partNum}",
+              Image = new()
+              { 
+                new UploadRefDto{ Id = videoUpload.Id!, Path = videoUpload.Path! }  
+              }
+            }
+          },
+          Settings = _settings!
+        });
+      }
+
 
       var req = new ScheduleBundleRequest
       {
@@ -196,7 +239,26 @@ namespace NyxCEngine.Services
 
       _logger.LogInformation(
         "✅ Scheduled SeriesId={SeriesId} Part={Part}/{Total} AssetId={AssetId} PostizPostId={PostizPostId} IntegrationId={IntegrationId} At={ScheduledAtUtc:o}",
-        next.SeriesId, partNum, next.SeriesCount, next.Id, first.PostId, integration.Id, scheduledAtUtc);
+        next.SeriesId, partNum, next.SeriesCount, next.Id, first.PostId, $"'{string.Join("__", integrations.Select(x => x.Id).ToList())}'", scheduledAtUtc);
+    }
+
+
+    private static async Task<DateTime> GetNextCustomerSlotUtcAsync(
+      NyxDbContext db,
+      string customerId,
+      TimeSpan cadence,
+      CancellationToken ct)
+    {
+      // latest scheduled time across ALL integrations for this customer
+      var last = await db.ScheduledPosts
+        .Where(s => s.CustomerId == customerId)
+        .MaxAsync(s => (DateTime?)s.ScheduledAtUtc, ct);
+
+      var anchor = last.HasValue
+        ? (last.Value > DateTime.UtcNow ? last.Value : DateTime.UtcNow)
+        : DateTime.UtcNow;
+
+      return anchor.Add(cadence);
     }
   }
 }
